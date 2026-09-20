@@ -19,7 +19,8 @@ administrator during the MVP phase.
 
 ## Current development status
 
-**Phase 1: Foundation — complete, pending Dan's local verification.**
+**Phase 1: Foundation — complete and machine-verified** (lint, typecheck,
+and production build all pass; see "Environment note (resolved)" below).
 
 Built:
 - Next.js (App Router) + TypeScript + Tailwind CSS v4 project scaffold
@@ -36,22 +37,27 @@ Not built yet (intentionally — see Recommended next steps):
 - Any league/dashboard/roster-facing UI
 - Live Supabase project (Dan needs to create one — see README's Local setup)
 
-### Important environment note for future Claude sessions
+### Environment note (resolved)
 
-Phase 1 was built in a sandboxed environment where the npm registry and most
-external hosts were blocked by network egress policy, **and** the bridge to
-Dan's local machine (`device_bash`) was down due to a known Windows-update
-issue (tracked by Anthropic, as of Sept 2026). As a result:
+Phase 1 was originally built in a sandbox that blocked the npm registry,
+plus a temporarily broken bridge to Dan's computer, so nothing was
+machine-verified at first. Both were resolved within the same session:
 
-- No `npm install`, `npm run lint`, `npm run typecheck`, or `npm run build`
-  was ever executed by Claude during Phase 1. Every file was hand-written
-  and carefully reviewed, but **has not been machine-verified**.
-- If you're a future Claude session and either of those constraints has
-  lifted, running the full verification suite (`npm install && npm run lint
-  && npm run typecheck && npm run build`) and fixing whatever it finds
-  should be an early priority — flag this file for an update once that's
-  done, since "not yet machine-verified" is effectively Phase 1 technical
-  debt until it happens.
+- `npm install`, `npm run lint`, `npm run typecheck` all run and pass
+  cleanly (verified via a shell on Dan's computer).
+- `npm run build` passes (verified in Dan's own Windows terminal — the
+  Linux bridge shell lacks the native SWC binary Turbopack needs and
+  couldn't download one, since it can't reach the npm registry either;
+  that's a limitation of that one shell, not of the project).
+- Along the way, a real bug was found and fixed: the FlatCompat-based
+  `eslint.config.mjs` pattern (the documented pattern as of Next 15)
+  crashes under Next.js 16 / eslint-config-next 16 with "TypeError:
+  Converting circular structure to JSON" — eslint-config-next@16 now
+  ships native flat config arrays, so wrapping them in FlatCompat
+  double-wraps the plugin objects into a circular reference. Fixed by
+  importing and spreading `eslint-config-next/core-web-vitals` and
+  `eslint-config-next/typescript` directly. If you ever see this error
+  again after a dependency bump, this is the first thing to check.
 
 ## Technology stack
 
@@ -237,10 +243,6 @@ brief.
 
 ## Known issues / technical debt
 
-- **Not yet machine-verified.** See "Important environment note" above —
-  `npm install`/lint/typecheck/build have not actually been run against
-  this code yet. Treat this as the top-priority item until it's done and
-  this note is removed.
 - **`profiles_admin_all` RLS policy permits an admin to `DELETE` a
   `profiles` row directly.** Doing so would orphan the corresponding
   `auth.users` row (there's no reverse cascade). Removing a family member
@@ -275,24 +277,21 @@ Nothing user-facing exists yet — no sign-in, no dashboard, no admin tools.
 
 In rough priority order:
 
-1. **Machine-verify Phase 1.** Run `npm install && npm run lint && npm run
-   typecheck && npm run build` and fix anything that surfaces — see "Known
-   issues" above.
-2. **Stand up the real Supabase project** and run the four migrations
+1. **Stand up the real Supabase project** and run the four migrations
    against it; confirm the schema applies cleanly and RLS behaves as
    designed (e.g. try reading/writing as a non-admin user and confirm writes
    are rejected).
-3. **Authentication.** Build the actual magic-link sign-in flow and the
+2. **Authentication.** Build the actual magic-link sign-in flow and the
    session-refresh middleware/proxy the Supabase SSR docs describe (not
    built in Phase 1 — the client/server helpers are ready for it but nothing
    calls them yet).
-4. **Seed Dan's real data.** Use the admin SQL/dashboard to create the
+3. **Seed Dan's real data.** Use the admin SQL/dashboard to create the
    *Survivor* and *Traitors* shows, current seasons, contestants, and a
    first league, so there's real data to build UI against.
-5. **Minimal admin CRUD** for shows/seasons/contestants/episodes/scoring
+4. **Minimal admin CRUD** for shows/seasons/contestants/episodes/scoring
    events — even a plain form-based interface — before investing in the
    polished family-facing UI, since Dan needs this to enter real data.
-6. **Family-facing read views**: league standings, a roster page, an
+5. **Family-facing read views**: league standings, a roster page, an
    episode scoring breakdown — reading from the views already built.
 
 Do not start any of these without Dan's explicit go-ahead — Phase 1 is
