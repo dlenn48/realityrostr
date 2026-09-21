@@ -19,10 +19,12 @@ administrator during the MVP phase.
 
 ## Current development status
 
-**Phase 2 (partial): Supabase + Auth — complete and machine-verified.**
-Dan explicitly scoped this pass to "Supabase setup + authentication only" —
-data seeding, admin CRUD, and family-facing UI are deliberately deferred to
-a later pass (see Recommended next steps).
+**Phase 2: Supabase + Auth — complete and machine-verified. Production
+deployment in progress.** Dan explicitly scoped Phase 2 to "Supabase setup +
+authentication only" — data seeding, admin CRUD, and family-facing UI are
+deliberately deferred to a later pass (see Recommended next steps). Dan has
+since approved moving on to deploying the app publicly at
+`realityrostr.com` (see "Deployment" below).
 
 Built in Phase 1 (foundation):
 - Next.js (App Router) + TypeScript + Tailwind CSS v4 project scaffold
@@ -50,7 +52,9 @@ Not built yet (intentionally — see Recommended next steps):
   rows yet beyond whatever `auth.users`/`profiles` rows sign-in creates.
 - Any admin interface.
 - Any league/dashboard/roster-facing UI.
-- Dan has not yet promoted himself to `admin` — see "First admin" below.
+
+Dan **has** promoted himself to `admin` — see "First admin" below for the
+bug that briefly blocked it and its fix.
 
 ### Environment note (resolved)
 
@@ -116,10 +120,24 @@ machine-verified at first. Both were resolved within the same session:
   instead, update this section and README's Database setup accordingly.
 - **Auth email:** using Supabase's built-in low-volume email sending for
   magic links (free tier — see COSTS.md). No custom SMTP configured.
-- **First admin:** still outstanding. `profiles.role` defaults to
-  `'member'` for everyone, Dan included. Before any admin feature is built,
-  run this once in the SQL Editor (see README's Database setup for the
-  exact statement) to promote Dan's own profile to `'admin'`.
+- **First admin:** done. `profiles.role` defaults to `'member'` for
+  everyone; Dan ran the promotion statement (see README's Database setup)
+  and his profile now shows `role = 'admin'`, confirmed via
+  `select email, role from public.profiles;`.
+  - This surfaced a real bug, since fixed in
+    `supabase/migrations/0006_fix_first_admin_bootstrap.sql`:
+    `prevent_profile_role_escalation()` (from 0002) rejected the promotion
+    with `P0001: Only an admin can change a profile role`, because
+    `auth.uid()` is `null` in the SQL Editor (no authenticated PostgREST
+    request context), and the original trigger logic treated a null
+    `auth.uid()` the same as "not an admin" — blocking *every* role change,
+    including the very first one, with no way out. 0006 changes the guard
+    to only fire `if auth.uid() is not null and not exists (...)`, i.e. it
+    only restricts role changes made by a signed-in app user hitting the
+    API; direct database access (SQL Editor, migrations, `service_role`)
+    already bypasses this trigger's intent regardless, since that caller
+    could just as easily disable RLS or drop the trigger outright. Run
+    0006 after 0005 on any project that applied the original 0002.
 
 ## Technology stack
 
@@ -146,7 +164,7 @@ src/
     database.ts             Hand-written types mirroring the schema (regenerate via Supabase CLI once adopted)
   proxy.ts                   Session-refresh Proxy (Next.js 16's renamed middleware.ts)
 supabase/
-  migrations/               Numbered plain-SQL migrations (0001-0005), run manually via the Supabase SQL Editor
+  migrations/               Numbered plain-SQL migrations (0001-0006), run manually via the Supabase SQL Editor
 ```
 
 As real features are added, prefer organizing `src/app` by route group
@@ -233,9 +251,11 @@ layer — both are required for a table to be reachable at all.
   Never trust a hidden button or disabled UI element as the only guard on
   an admin action — the actual enforcement is the RLS policy plus, for the
   `profiles.role` field specifically, the `prevent_profile_role_escalation`
-  trigger (a user cannot promote their own role even via a direct API call).
-- **First admin:** still outstanding — see "Supabase project setup" above
-  for the exact one-time SQL statement Dan needs to run.
+  trigger (a user cannot promote their own role even via a direct API call,
+  once one admin already exists — see "First admin" below for the bootstrap
+  edge case).
+- **First admin:** done — see "Supabase project setup" above for the
+  bootstrap bug it briefly hit and the 0006 fix.
 
 ## Scoring architecture
 
@@ -342,9 +362,6 @@ brief.
 - **Supabase free-tier project auto-pause after 7 days of inactivity** is a
   real operational quirk for a seasonal app — see COSTS.md. Not a code
   issue, just something Dan needs to remember between seasons.
-- **Dan has not yet been promoted to `admin`.** Every admin-gated feature
-  (any write to any table) will fail for everyone, including Dan, until the
-  one-time promotion SQL statement is run — see "Supabase project setup."
 - **GitHub repo is currently Public.** Dan was advised to consider making
   it Private for a family app; his call, not yet changed as of this
   writing.
@@ -352,19 +369,33 @@ brief.
 ## Completed functionality
 
 - Project scaffold, environment/config handling, and documentation.
-- Full schema design, applied to a live Supabase project (all 5 migrations
-  run successfully).
+- Full schema design, applied to a live Supabase project (all 6 migrations
+  run successfully, including the 0006 admin-bootstrap fix).
 - Working magic-link sign-in, end-to-end, against the real project.
+- Dan promoted to `admin` on his live profile.
 
 Nothing else user-facing exists yet — no dashboard, no admin tools, no real
 show data.
+
+## Deployment
+
+Vercel deployment (new project under Dan's existing personal Vercel
+account, alongside his separate Orivian project — Hobby plan's 200-project
+limit made a separate team unnecessary) plus the custom domain
+`realityrostr.com` (bought on Namecheap) are in progress as of this
+writing. Once live, this section should record: the Vercel project name,
+the production domain(s) wired up, the DNS record types added at
+Namecheap, and — critically — that Supabase Auth's **Authentication → URL
+Configuration** must include `https://realityrostr.com` (and the `www`
+variant if used) as an allowed redirect URL, or magic-link sign-in will
+only work on `localhost`.
 
 ## Recommended next steps
 
 In rough priority order:
 
-1. **Promote Dan to admin** (one SQL statement — see "Supabase project
-   setup") — required before any admin-write feature can be tested at all.
+1. **Finish production deployment**: Vercel project live, `realityrostr.com`
+   DNS connected, Supabase redirect URLs updated for the production domain.
 2. **Seed Dan's real data.** Use the SQL Editor (no admin UI exists yet) to
    create the *Survivor* and *Traitors* shows, current seasons, contestants,
    and a first league, so there's real data to build UI against.

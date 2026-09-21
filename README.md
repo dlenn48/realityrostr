@@ -13,10 +13,11 @@ and current project status.
 
 ## Status
 
-**Phase 2 (partial): Supabase + Auth.** A real Supabase project is live with
-the full schema applied, and magic-link sign-in works end-to-end. There is
-still no admin interface, no real show/contestant data, and no
-league/dashboard UI — those are next. See
+**Phase 2: Supabase + Auth — complete.** A real Supabase project is live
+with the full schema applied, magic-link sign-in works end-to-end, and Dan
+(the project owner) is promoted to admin. Production deployment to
+`realityrostr.com` is in progress. There is still no admin interface, no
+real show/contestant data, and no league/dashboard UI — those are next. See
 [CLAUDE.md](./CLAUDE.md#recommended-next-steps) for what's next.
 
 ## Technology stack
@@ -82,7 +83,7 @@ this):
 ### 3. Run the database migrations
 
 In the Supabase dashboard, open the **SQL Editor** and run the files in
-`supabase/migrations/` **in order** (0001 through 0005). Each file is plain
+`supabase/migrations/` **in order** (0001 through 0006). Each file is plain
 SQL — paste its contents in and click Run. See
 [Database setup](#database-setup) below for what each file does.
 
@@ -144,7 +145,7 @@ src/
     database.ts        Hand-written types mirroring the DB schema (see file header)
   proxy.ts              Session-refresh Proxy (Next.js 16's renamed middleware.ts)
 supabase/
-  migrations/          Numbered, plain-SQL migrations (0001-0005) — run manually in the Supabase SQL Editor for now
+  migrations/          Numbered, plain-SQL migrations (0001-0006) — run manually in the Supabase SQL Editor for now
 ```
 
 As real features (admin, league pages) are built, `src/app` will grow route
@@ -153,7 +154,7 @@ conventions section for how that should be organized as it happens.
 
 ## Database setup
 
-The schema is split into five migrations, meant to be run in order:
+The schema is split into six migrations, meant to be run in order:
 
 1. **`0001_core_schema.sql`** — every table (`profiles`, `shows`, `seasons`,
    `contestants`, `leagues`, `league_members`, `rosters`, `roster_entries`,
@@ -174,13 +175,18 @@ The schema is split into five migrations, meant to be run in order:
    `authenticated` role, required because this project was created with
    "Automatically expose new tables" turned off (see step 2 above). Without
    this, every query would fail with "permission denied," regardless of RLS.
+6. **`0006_fix_first_admin_bootstrap.sql`** — fixes a lockout bug in the
+   `prevent_profile_role_escalation` trigger (from migration 2) that
+   blocked *any* role change — including the very first admin promotion
+   below — when run from the SQL Editor. See the migration file's own
+   comment, or [CLAUDE.md](./CLAUDE.md#supabase-project-setup), for why.
 
 See [CLAUDE.md](./CLAUDE.md#database-architecture) for the full reasoning
 behind this design — especially why scoring is modeled as an append-only
 ledger rather than stored totals, and why nothing here is Survivor- or
 Traitors-specific.
 
-**Once you've run all five migrations and signed in through the app at
+**Once you've run all six migrations and signed in through the app at
 least once**, promote yourself to admin (replace the email with your own)
 by running this once in the SQL Editor:
 
@@ -209,7 +215,7 @@ npx supabase gen types typescript --project-id <your-project-id> > src/types/dat
 - Never commit `.env.local` or any real credentials — only `.env.example`
   with placeholder values.
 - Schema changes go in a new numbered migration file (e.g.
-  `0006_add_something.sql`) — don't edit the existing numbered files once
+  `0007_add_something.sql`) — don't edit the existing numbered files once
   they've been run against a real database. A new table needs both an RLS
   policy and a Data API grant to actually be reachable — see
   [CLAUDE.md](./CLAUDE.md#supabase-project-setup).
