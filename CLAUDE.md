@@ -19,23 +19,38 @@ administrator during the MVP phase.
 
 ## Current development status
 
-**Phase 1: Foundation — complete and machine-verified** (lint, typecheck,
-and production build all pass; see "Environment note (resolved)" below).
+**Phase 2 (partial): Supabase + Auth — complete and machine-verified.**
+Dan explicitly scoped this pass to "Supabase setup + authentication only" —
+data seeding, admin CRUD, and family-facing UI are deliberately deferred to
+a later pass (see Recommended next steps).
 
-Built:
+Built in Phase 1 (foundation):
 - Next.js (App Router) + TypeScript + Tailwind CSS v4 project scaffold
-- Full database schema + Row Level Security design (see below), as SQL
-  migrations in `supabase/migrations/`
-- Supabase client helpers (browser + server), not yet called from any page
+- Full database schema + Row Level Security design, as SQL migrations in
+  `supabase/migrations/`
+- Supabase client helpers (browser + server)
 - Hand-written TypeScript types mirroring the schema (`src/types/database.ts`)
 - `.env.example`, `.gitignore`, README, this file, COSTS.md
-- A minimal homepage that confirms the app builds and runs — no real UI yet
+
+Built in Phase 2 (this pass):
+- A real Supabase project exists (org: a new "Personal" org, separate from
+  Dan's Orivian org, on the same Supabase account — see "Supabase project
+  setup" below for why). All five migrations (0001–0005) are applied to it.
+- Working magic-link sign-in, end-to-end, verified by Dan against the real
+  project: `/login` (request a link) → email → `/auth/callback` (exchanges
+  the code for a session) → signed-in state shown on `/`.
+- `src/proxy.ts` — session-refresh Proxy (Next.js 16's renamed
+  `middleware.ts` convention; see the file's own comment for the doc link).
+- `src/app/actions/auth.ts` — a `signOut()` Server Action.
+- `.env.local` exists on Dan's machine with real (non-secret) project
+  credentials — never committed, see `.gitignore`.
 
 Not built yet (intentionally — see Recommended next steps):
-- Authentication / login flows
-- Any admin interface
-- Any league/dashboard/roster-facing UI
-- Live Supabase project (Dan needs to create one — see README's Local setup)
+- Any real show/season/contestant data — the database is schema-only, no
+  rows yet beyond whatever `auth.users`/`profiles` rows sign-in creates.
+- Any admin interface.
+- Any league/dashboard/roster-facing UI.
+- Dan has not yet promoted himself to `admin` — see "First admin" below.
 
 ### Environment note (resolved)
 
@@ -59,6 +74,53 @@ machine-verified at first. Both were resolved within the same session:
   `eslint-config-next/typescript` directly. If you ever see this error
   again after a dependency bump, this is the first thing to check.
 
+## Supabase project setup
+
+- **Account/org:** Dan's existing Supabase account (shared with his
+  separate Orivian project), but a **new organization** was created for
+  RealityRostr rather than reusing Orivian's org. Reasoning: Supabase's
+  free-tier project quota is per-organization, not per-account, so a new
+  org gets its own quota and its own access boundary (if Orivian's org
+  ever gets an outside collaborator, they have zero visibility into this
+  project) without the overhead of a whole separate Supabase account/login.
+- **Project creation security settings** (this matters — see below):
+  - **Enable Data API:** on (required — the app talks to Postgres only
+    through the auto-generated Data API via `@supabase/supabase-js`).
+  - **Automatically expose new tables:** turned **off**, against the
+    project-creation wizard's own default. Supabase's default (on) means a
+    new table becomes reachable through the Data API the moment it's
+    created, relying on RLS as the only gate. Off means a table additionally
+    needs an explicit `GRANT` before it's reachable at all — defense in
+    depth on top of RLS, not instead of it. This is why
+    `0005_data_api_grants.sql` exists: it grants `select/insert/update/delete`
+    on every table (and `select` on every view) to the `authenticated` role
+    only — deliberately never to `anon`, since the app has no unauthenticated
+    data access path. It also sets a default-privileges rule so tables added
+    by *future* migrations inherit the same grant automatically — don't
+    forget it still needs RLS policies too (see the next bullet).
+  - **Enable automatic RLS:** turned **on**, against the wizard's own
+    default (off). This makes Supabase auto-enable (default-deny) RLS on
+    any table created outside of a reviewed migration — e.g. if Dan ever
+    creates one by hand in the Table Editor — so an accidental table starts
+    locked down instead of wide open. It's a safety net; every table this
+    project actually ships still gets RLS enabled explicitly in
+    `0004_row_level_security.sql` regardless.
+  - Net effect: a table in this project is reachable through the API only
+    if it has *both* a `GRANT` (0005) *and* a permissive RLS policy (0004).
+    Missing either one and a query fails closed, not open.
+- **Running migrations:** there is no Supabase CLI / `supabase db push`
+  workflow set up (deliberately, for MVP simplicity — see the "Simplicity"
+  cost/architecture principle). All five `supabase/migrations/*.sql` files
+  were pasted into the Supabase Dashboard's SQL Editor and run in order,
+  by Dan, one at a time. If a Phase 3+ session adopts the CLI workflow
+  instead, update this section and README's Database setup accordingly.
+- **Auth email:** using Supabase's built-in low-volume email sending for
+  magic links (free tier — see COSTS.md). No custom SMTP configured.
+- **First admin:** still outstanding. `profiles.role` defaults to
+  `'member'` for everyone, Dan included. Before any admin feature is built,
+  run this once in the SQL Editor (see README's Database setup for the
+  exact statement) to promote Dan's own profile to `'admin'`.
+
 ## Technology stack
 
 Next.js (App Router, TypeScript) + Tailwind CSS v4 + Supabase (Postgres +
@@ -71,21 +133,26 @@ the specific limits checked.
 
 ```
 src/
-  app/                    Next.js App Router routes
+  app/
+    login/page.tsx          Magic-link sign-in form (Client Component)
+    auth/callback/route.ts   Exchanges the emailed code for a session, redirects in
+    actions/auth.ts          signOut() Server Action
+    page.tsx                  Homepage — shows signed-in state
   lib/
     supabase/
       client.ts            Browser Supabase client
       server.ts             Server Supabase client (Server Components, Route Handlers, Server Actions)
   types/
-    database.ts             Hand-written types mirroring the schema (regenerate via Supabase CLI once a live project exists)
+    database.ts             Hand-written types mirroring the schema (regenerate via Supabase CLI once adopted)
+  proxy.ts                   Session-refresh Proxy (Next.js 16's renamed middleware.ts)
 supabase/
-  migrations/               Numbered plain-SQL migrations, run manually via the Supabase SQL Editor
+  migrations/               Numbered plain-SQL migrations (0001-0005), run manually via the Supabase SQL Editor
 ```
 
 As real features are added, prefer organizing `src/app` by route group
 (e.g. `(dashboard)`, `(admin)`) and giving each non-trivial feature its own
 module under `src/lib` (e.g. `src/lib/leagues/`, `src/lib/scoring/`) rather
-than one large shared file. Nothing in Phase 1 needed this yet.
+than one large shared file. Nothing built so far needed this yet.
 
 ## Database architecture
 
@@ -101,6 +168,10 @@ you need the exact columns/constraints):
 `league_effective_scoring_rules`, `contestant_points_by_league`,
 `contestant_episode_points`, `contestant_season_points`, `roster_points`,
 `league_standings`.
+
+See "Supabase project setup" above for the Data API grants
+(`0005_data_api_grants.sql`) that sit alongside RLS as a second access-control
+layer — both are required for a table to be reachable at all.
 
 ### Database design principles (do not casually violate these)
 
@@ -139,29 +210,32 @@ you need the exact columns/constraints):
 
 ## Authentication / authorization approach
 
-- **Authentication:** Supabase Auth. No login UI exists yet (Phase 2). The
-  intended method is Supabase's magic-link / OTP email sign-in — no
+- **Authentication:** Supabase Auth via magic-link / OTP email sign-in — no
   passwords to manage for a handful of family members, and it stays within
-  Supabase's free-tier built-in email sending. This can be revisited if it
-  proves inconvenient.
+  Supabase's free-tier built-in email sending. **Built and verified working
+  end-to-end** (see "Current development status"). Flow: `src/app/login`
+  calls `supabase.auth.signInWithOtp()` → Supabase emails a link to
+  `/auth/callback?code=...` → `src/app/auth/callback/route.ts` exchanges the
+  code for a session via `exchangeCodeForSession()` → `src/proxy.ts` keeps
+  that session refreshed on every subsequent request.
 - **Authorization is enforced in the database, not the client.** Every
-  table has Row Level Security enabled (`0004_row_level_security.sql`).
-  Phase 1's policy shape: any authenticated user can **read** everything;
-  only a user with `profiles.role = 'admin'` can **write** anything. This is
-  intentionally coarse (no per-league read restriction yet) because family
-  members currently share one "space" — tightening it to
-  per-league-membership visibility later is additive (the
-  `is_league_member()` helper function already exists for that, just isn't
-  used by any policy yet) and should not require restructuring existing
-  policies, only adding conditions to them.
+  table has Row Level Security enabled (`0004_row_level_security.sql`) *and*
+  an explicit Data API grant (`0005_data_api_grants.sql` — see "Supabase
+  project setup" for why both layers exist). Current policy shape: any
+  authenticated user can **read** everything; only a user with
+  `profiles.role = 'admin'` can **write** anything. This is intentionally
+  coarse (no per-league read restriction yet) because family members
+  currently share one "space" — tightening it to per-league-membership
+  visibility later is additive (the `is_league_member()` helper function
+  already exists for that, just isn't used by any policy yet) and should
+  not require restructuring existing policies, only adding conditions to
+  them.
   Never trust a hidden button or disabled UI element as the only guard on
   an admin action — the actual enforcement is the RLS policy plus, for the
   `profiles.role` field specifically, the `prevent_profile_role_escalation`
   trigger (a user cannot promote their own role even via a direct API call).
-- **First admin:** no user starts as admin. After Dan signs up through the
-  app (once Phase 2 builds sign-in), he needs to run one SQL statement in
-  the Supabase SQL Editor to promote himself — documented in README.md's
-  Database setup section. This is a one-time manual step, not a bug.
+- **First admin:** still outstanding — see "Supabase project setup" above
+  for the exact one-time SQL statement Dan needs to run.
 
 ## Scoring architecture
 
@@ -189,6 +263,9 @@ application code instead of reading a view, stop and reconsider.
 
 - Schema changes are new numbered migration files
   (`000N_description.sql`), never edits to an already-applied migration.
+- A new table needs **both** an RLS policy (0004-style) and a Data API
+  grant (0005-style) to be reachable — see "Supabase project setup." Adding
+  one without the other is a common way to ship a table that silently 403s.
 - Every new external service/dependency gets an entry in COSTS.md *before*
   being adopted — purpose, cost, free-tier limits, what would trigger a
   cost, and a migration path. Don't add a paid or usage-billed dependency
@@ -211,7 +288,9 @@ npm run typecheck   # tsc --noEmit
 ## Environment setup
 
 See README.md's "Local setup" and "Required environment variables" sections
-— not duplicated here to avoid the two files drifting out of sync.
+— not duplicated here to avoid the two files drifting out of sync. Dan's
+`.env.local` already has real (non-secret) values from the live Supabase
+project; nothing further to configure for local dev.
 
 ## External services
 
@@ -237,6 +316,10 @@ brief.
   schema.** Use `scoring_event_types` and `contestants.metadata` instead.
 - **RLS stays enabled on every table**, even during development. Don't
   disable it "temporarily" to make debugging easier.
+- **"Automatically expose new tables" stays off, and every new table gets
+  its own Data API grant.** Don't flip this project setting back on as a
+  shortcut — add the grant statement to the table's migration instead (see
+  "Supabase project setup").
 - **`roster_entries.league_id` is trigger-maintained, not app-maintained.**
   Don't start setting it from application code — that reopens the
   possibility of it disagreeing with the roster's actual league.
@@ -252,47 +335,45 @@ brief.
   `DELETE` from that policy) if an admin UI ever exposes profile deletion
   directly.
 - **`roster_points` sums a contestant's entire season total**, even points
-  scored before they joined a given roster. Correct for Phase 1 (rosters
-  are set once at draft time and don't change), but would need to become
-  a time-windowed sum (`added_at` to `removed_at`) if in-season trading is
+  scored before they joined a given roster. Correct while rosters are set
+  once at draft time and don't change, but would need to become a
+  time-windowed sum (`added_at` to `removed_at`) if in-season trading is
   ever added.
 - **Supabase free-tier project auto-pause after 7 days of inactivity** is a
   real operational quirk for a seasonal app — see COSTS.md. Not a code
   issue, just something Dan needs to remember between seasons.
-- **No live Supabase project exists yet.** The migrations are written and
-  reviewed but have never been run against a real database. Running them
-  and confirming they apply cleanly is part of Phase 2 setup, not something
-  Claude could verify without Dan's Supabase credentials.
+- **Dan has not yet been promoted to `admin`.** Every admin-gated feature
+  (any write to any table) will fail for everyone, including Dan, until the
+  one-time promotion SQL statement is run — see "Supabase project setup."
+- **GitHub repo is currently Public.** Dan was advised to consider making
+  it Private for a family app; his call, not yet changed as of this
+  writing.
 
 ## Completed functionality
 
-- Project scaffold, environment/config handling, and documentation (this
-  Phase 1 task).
-- Full schema design (not yet applied to a live database — see Known
-  issues).
+- Project scaffold, environment/config handling, and documentation.
+- Full schema design, applied to a live Supabase project (all 5 migrations
+  run successfully).
+- Working magic-link sign-in, end-to-end, against the real project.
 
-Nothing user-facing exists yet — no sign-in, no dashboard, no admin tools.
+Nothing else user-facing exists yet — no dashboard, no admin tools, no real
+show data.
 
-## Recommended next steps (Phase 2 candidate)
+## Recommended next steps
 
 In rough priority order:
 
-1. **Stand up the real Supabase project** and run the four migrations
-   against it; confirm the schema applies cleanly and RLS behaves as
-   designed (e.g. try reading/writing as a non-admin user and confirm writes
-   are rejected).
-2. **Authentication.** Build the actual magic-link sign-in flow and the
-   session-refresh middleware/proxy the Supabase SSR docs describe (not
-   built in Phase 1 — the client/server helpers are ready for it but nothing
-   calls them yet).
-3. **Seed Dan's real data.** Use the admin SQL/dashboard to create the
-   *Survivor* and *Traitors* shows, current seasons, contestants, and a
-   first league, so there's real data to build UI against.
-4. **Minimal admin CRUD** for shows/seasons/contestants/episodes/scoring
+1. **Promote Dan to admin** (one SQL statement — see "Supabase project
+   setup") — required before any admin-write feature can be tested at all.
+2. **Seed Dan's real data.** Use the SQL Editor (no admin UI exists yet) to
+   create the *Survivor* and *Traitors* shows, current seasons, contestants,
+   and a first league, so there's real data to build UI against.
+3. **Minimal admin CRUD** for shows/seasons/contestants/episodes/scoring
    events — even a plain form-based interface — before investing in the
    polished family-facing UI, since Dan needs this to enter real data.
-5. **Family-facing read views**: league standings, a roster page, an
+4. **Family-facing read views**: league standings, a roster page, an
    episode scoring breakdown — reading from the views already built.
 
-Do not start any of these without Dan's explicit go-ahead — Phase 1 is
-scoped to stop here and wait for review, per the project brief.
+Do not start any of these without Dan's explicit go-ahead — each phase is
+scoped deliberately and stops for review before the next begins, per the
+project brief.

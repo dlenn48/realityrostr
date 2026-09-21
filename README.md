@@ -13,9 +13,10 @@ and current project status.
 
 ## Status
 
-**Phase 1: Foundation.** The app builds and runs, the database schema and
-security model are designed, and the project structure is in place. There is
-no login, dashboard, or admin UI yet — that starts in Phase 2. See
+**Phase 2 (partial): Supabase + Auth.** A real Supabase project is live with
+the full schema applied, and magic-link sign-in works end-to-end. There is
+still no admin interface, no real show/contestant data, and no
+league/dashboard UI — those are next. See
 [CLAUDE.md](./CLAUDE.md#recommended-next-steps) for what's next.
 
 ## Technology stack
@@ -50,9 +51,30 @@ npm install
 
 ### 2. Create a Supabase project
 
-1. Go to [supabase.com](https://supabase.com) and create a free account/organization if you don't have one.
-2. Create a new project (choose any region close to you; the free tier includes one active project — see COSTS.md).
-3. Once it's provisioned, go to **Settings -> API** and note:
+If you're setting this up fresh (this project already has a live Supabase
+project — ask whoever set it up for the values in step 4 before redoing
+this):
+
+1. Go to [supabase.com](https://supabase.com) and sign in (or create a free
+   account).
+2. Create a new **organization** for this if you don't already have one you
+   want to use — free-tier project quotas are per-organization, so a
+   dedicated org keeps this project's quota and access separate from any
+   other Supabase projects on the same account.
+3. Create a new project in it (name it `realityrostr`, pick any region close
+   to you). On the creation screen:
+   - **Enable Data API:** leave checked.
+   - **Automatically expose new tables:** **uncheck this.** RLS
+     (below) is the real access control; leaving this checked would also
+     let a table be reached through the Data API before it has an explicit
+     grant. Because it's off, `supabase/migrations/0005_data_api_grants.sql`
+     explicitly grants the tables/views this project needs — see that
+     file and [CLAUDE.md](./CLAUDE.md#supabase-project-setup) for why.
+   - **Enable automatic RLS:** check this. It's a safety net that
+     auto-locks-down any table created outside a reviewed migration (e.g.
+     by hand in the Table Editor) — every table this project ships already
+     gets RLS explicitly in `0004_row_level_security.sql` regardless.
+4. Once it's provisioned, go to **Project Settings -> API Keys** and note:
    - The **Project URL**
    - The **publishable** (or `anon`) key — safe for the browser
    - The **secret** (or `service_role`) key — server-only, never expose this
@@ -60,8 +82,8 @@ npm install
 ### 3. Run the database migrations
 
 In the Supabase dashboard, open the **SQL Editor** and run the files in
-`supabase/migrations/` **in order** (0001, then 0002, then 0003, then 0004).
-Each file is plain SQL — paste its contents in and click Run. See
+`supabase/migrations/` **in order** (0001 through 0005). Each file is plain
+SQL — paste its contents in and click Run. See
 [Database setup](#database-setup) below for what each file does.
 
 ### 4. Configure environment variables
@@ -70,8 +92,9 @@ Each file is plain SQL — paste its contents in and click Run. See
 cp .env.example .env.local
 ```
 
-Fill in the three values from step 2. `.env.local` is already git-ignored —
-never commit real credentials. See [Required environment variables](#required-environment-variables).
+Fill in the values from step 2 (`SUPABASE_SECRET_KEY` can stay blank —
+nothing uses it yet). `.env.local` is already git-ignored — never commit
+real credentials. See [Required environment variables](#required-environment-variables).
 
 ### 5. Run the app
 
@@ -79,8 +102,9 @@ never commit real credentials. See [Required environment variables](#required-en
 npm run dev
 ```
 
-Visit [http://localhost:3000](http://localhost:3000) — you should see a
-RealityRostr Phase 1 confirmation page.
+Visit [http://localhost:3000](http://localhost:3000). Click **Sign in**,
+enter your email, and click the link Supabase emails you — you should land
+back on the homepage showing "Signed in as [your email]".
 
 ## Required environment variables
 
@@ -91,7 +115,7 @@ Summary:
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Your Supabase project's API URL. |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Yes | Public key for browser/server queries — protected by Row Level Security, not by secrecy. |
-| `SUPABASE_SECRET_KEY` | **No** | Server-only key that bypasses Row Level Security. Not used anywhere yet in Phase 1; reserved for a future admin/server action that deliberately needs it. Never prefix a variable like this with `NEXT_PUBLIC_`. |
+| `SUPABASE_SECRET_KEY` | **No** | Server-only key that bypasses Row Level Security. Not used anywhere yet; reserved for a future admin/server action that deliberately needs it. Never prefix a variable like this with `NEXT_PUBLIC_`. |
 
 ## Development commands
 
@@ -107,25 +131,29 @@ npm run typecheck  # TypeScript, no output emitted
 
 ```
 src/
-  app/                Next.js App Router pages (currently just the Phase 1 homepage)
+  app/
+    login/page.tsx           Magic-link sign-in form
+    auth/callback/route.ts    Exchanges the emailed code for a session
+    actions/auth.ts            Sign-out Server Action
+    page.tsx                   Homepage — shows signed-in state
   lib/
     supabase/
       client.ts        Supabase client for Client Components (browser)
       server.ts         Supabase client for Server Components / Route Handlers
   types/
     database.ts        Hand-written types mirroring the DB schema (see file header)
+  proxy.ts              Session-refresh Proxy (Next.js 16's renamed middleware.ts)
 supabase/
-  migrations/          Numbered, plain-SQL migrations — run manually in the Supabase SQL Editor for now
+  migrations/          Numbered, plain-SQL migrations (0001-0005) — run manually in the Supabase SQL Editor for now
 ```
 
-This is intentionally shallow for Phase 1. As real features (auth, admin,
-league pages) are built, `src/app` will grow route groups and `src/lib` will
-grow feature-specific modules — see CLAUDE.md's conventions section for how
-that should be organized as it happens.
+As real features (admin, league pages) are built, `src/app` will grow route
+groups and `src/lib` will grow feature-specific modules — see CLAUDE.md's
+conventions section for how that should be organized as it happens.
 
 ## Database setup
 
-The schema is split into four migrations, meant to be run in order:
+The schema is split into five migrations, meant to be run in order:
 
 1. **`0001_core_schema.sql`** — every table (`profiles`, `shows`, `seasons`,
    `contestants`, `leagues`, `league_members`, `rosters`, `roster_entries`,
@@ -140,27 +168,34 @@ The schema is split into four migrations, meant to be run in order:
    `league_standings`, etc.) that compute every point total live, so nothing
    in the schema stores a total that could drift from reality.
 4. **`0004_row_level_security.sql`** — enables Row Level Security on every
-   table and defines the Phase 1 policy shape: any signed-in family member
-   can read everything; only an admin can write anything.
+   table and defines the policy shape: any signed-in family member can read
+   everything; only an admin can write anything.
+5. **`0005_data_api_grants.sql`** — explicit Data API grants for the
+   `authenticated` role, required because this project was created with
+   "Automatically expose new tables" turned off (see step 2 above). Without
+   this, every query would fail with "permission denied," regardless of RLS.
 
 See [CLAUDE.md](./CLAUDE.md#database-architecture) for the full reasoning
 behind this design — especially why scoring is modeled as an append-only
 ledger rather than stored totals, and why nothing here is Survivor- or
 Traitors-specific.
 
-**Once you've run all four migrations**, promote yourself to admin (replace
-the email with your own) by running this once in the SQL Editor, after
-you've signed up through the app in a later phase:
+**Once you've run all five migrations and signed in through the app at
+least once**, promote yourself to admin (replace the email with your own)
+by running this once in the SQL Editor:
 
 ```sql
 update public.profiles set role = 'admin' where email = 'you@example.com';
 ```
 
+Nothing admin-only exists in the UI yet — this step just makes future admin
+features work once they're built.
+
 ### Regenerating types from a live project
 
-`src/types/database.ts` is hand-written to match the migrations above. Once
-your Supabase project exists and has the schema applied, you can regenerate
-it for real instead of hand-maintaining it:
+`src/types/database.ts` is hand-written to match the migrations above.
+Since a live project now exists, you can regenerate it for real instead of
+hand-maintaining it:
 
 ```bash
 npx supabase gen types typescript --project-id <your-project-id> > src/types/database.ts
@@ -174,7 +209,9 @@ npx supabase gen types typescript --project-id <your-project-id> > src/types/dat
 - Never commit `.env.local` or any real credentials — only `.env.example`
   with placeholder values.
 - Schema changes go in a new numbered migration file (e.g.
-  `0005_add_something.sql`) — don't edit the existing numbered files once
-  they've been run against a real database.
+  `0006_add_something.sql`) — don't edit the existing numbered files once
+  they've been run against a real database. A new table needs both an RLS
+  policy and a Data API grant to actually be reachable — see
+  [CLAUDE.md](./CLAUDE.md#supabase-project-setup).
 - Keep [CLAUDE.md](./CLAUDE.md) up to date when you make a decision future
   sessions (with Claude or otherwise) will need to know about.
